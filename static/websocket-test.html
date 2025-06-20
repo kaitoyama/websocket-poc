@@ -53,6 +53,18 @@
             border-left-color: #dc3545;
             background-color: #f8d7da;
         }
+        .counter {
+            border-left-color: #28a745;
+            background-color: #d4edda;
+        }
+        .user-join {
+            border-left-color: #17a2b8;
+            background-color: #d1ecf1;
+        }
+        .user-leave {
+            border-left-color: #ffc107;
+            background-color: #fff3cd;
+        }
         .status {
             font-weight: bold;
             margin: 10px 0;
@@ -100,11 +112,12 @@
     <script>
         let socket = null;
         let reconnectInterval = null;
+        let currentUserId = null;
 
-        function addMessage(message, isError = false) {
+        function addMessage(message, messageType = 'info') {
             const messagesDiv = document.getElementById('messages');
             const messageDiv = document.createElement('div');
-            messageDiv.className = isError ? 'message error' : 'message';
+            messageDiv.className = `message ${messageType}`;
             messageDiv.innerHTML = `<strong>${new Date().toLocaleTimeString()}:</strong> ${message}`;
             messagesDiv.appendChild(messageDiv);
             messagesDiv.scrollTop = messagesDiv.scrollHeight;
@@ -128,6 +141,8 @@
                 return;
             }
 
+            currentUserId = userId || `user_${Date.now()}`;
+
             // WebSocket URLを構築
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const host = window.location.host;
@@ -141,30 +156,63 @@
                 socket = new WebSocket(wsUrl);
                 
                 socket.onopen = function(event) {
-                    addMessage(`WebSocket接続が確立されました (Room: ${roomId})`);
+                    addMessage(`WebSocket接続が確立されました (Room: ${roomId}, User: ${currentUserId})`);
                     updateStatus('接続中', true);
                 };
                 
                 socket.onmessage = function(event) {
-                    // サーバーから送信されるのは単純な数値文字列
-                    const counter = event.data;
-                    addMessage(`カウンター: ${counter} (Room: ${roomId})`);
+                    try {
+                        // JSONイベントメッセージを解析
+                        const eventData = JSON.parse(event.data);
+                        handleWebSocketEvent(eventData, roomId);
+                    } catch (error) {
+                        // 従来のテキストメッセージとして処理（後方互換性）
+                        addMessage(`メッセージ: ${event.data}`);
+                    }
                 };
                 
                 socket.onclose = function(event) {
-                    addMessage(`WebSocket接続が閉じられました (Code: ${event.code})`, event.code !== 1000);
+                    addMessage(`WebSocket接続が閉じられました (Code: ${event.code})`, event.code !== 1000 ? 'error' : 'info');
                     updateStatus('切断中', false);
                     socket = null;
                 };
                 
                 socket.onerror = function(event) {
-                    addMessage('WebSocketエラーが発生しました', true);
+                    addMessage('WebSocketエラーが発生しました', 'error');
                     updateStatus('エラー', false);
                 };
                 
             } catch (error) {
-                addMessage(`接続エラー: ${error.message}`, true);
+                addMessage(`接続エラー: ${error.message}`, 'error');
                 updateStatus('エラー', false);
+            }
+        }
+
+        function handleWebSocketEvent(eventData, roomId) {
+            const { event, data } = eventData;
+            
+            switch (event) {
+                case 'counter_update':
+                    addMessage(`カウンター: ${data.count} (Room: ${data.room_id})`, 'counter');
+                    break;
+                    
+                case 'user_join':
+                    const joinMsg = data.user_id === currentUserId 
+                        ? `あなたがルームに参加しました` 
+                        : `${data.user_id} がルームに参加しました`;
+                    addMessage(`${joinMsg} (合計: ${data.total_users}人)`, 'user-join');
+                    break;
+                    
+                case 'user_leave':
+                    const leaveMsg = data.user_id === currentUserId 
+                        ? `あなたがルームから退出しました` 
+                        : `${data.user_id} がルームから退出しました`;
+                    addMessage(`${leaveMsg} (合計: ${data.total_users}人)`, 'user-leave');
+                    break;
+                    
+                default:
+                    addMessage(`未知のイベント: ${event}`, 'error');
+                    console.log('Unknown event:', eventData);
             }
         }
 

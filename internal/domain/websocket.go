@@ -2,12 +2,40 @@ package domain
 
 import (
 	"context"
-	"fmt"
+	"encoding/json"
 	"sync"
 	"time"
 
 	"github.com/coder/websocket"
 )
+
+// WebSocketEvent represents a WebSocket event message
+type WebSocketEvent struct {
+	Event string      `json:"event"`
+	Data  interface{} `json:"data"`
+}
+
+// CounterData represents counter update data
+type CounterData struct {
+	Count  int    `json:"count"`
+	RoomID string `json:"room_id"`
+}
+
+// UserJoinData represents user join data
+type UserJoinData struct {
+	UserID      string `json:"user_id"`
+	RoomID      string `json:"room_id"`
+	TotalUsers  int    `json:"total_users"`
+	JoinedAt    string `json:"joined_at"`
+}
+
+// UserLeaveData represents user leave data
+type UserLeaveData struct {
+	UserID      string `json:"user_id"`
+	RoomID      string `json:"room_id"`
+	TotalUsers  int    `json:"total_users"`
+	LeftAt      string `json:"left_at"`
+}
 
 // WebSocketConnection represents a WebSocket connection
 type WebSocketConnection struct {
@@ -83,6 +111,15 @@ func (r *Room) AddConnection(connID string, conn *WebSocketConnection) {
 
 	r.Connections[connID] = conn
 
+	// Broadcast user join event
+	joinData := UserJoinData{
+		UserID:     conn.UserID,
+		RoomID:     r.ID,
+		TotalUsers: len(r.Connections),
+		JoinedAt:   time.Now().Format(time.RFC3339),
+	}
+	r.broadcastEvent("user_join", joinData)
+
 	// Start the counter if this is the first connection
 	if len(r.Connections) == 1 && !r.Started {
 		r.startCounter()
@@ -92,13 +129,57 @@ func (r *Room) AddConnection(connID string, conn *WebSocketConnection) {
 // RemoveConnection removes a connection from a room
 func (r *Room) RemoveConnection(connID string) {
 	r.Mutex.Lock()
-	defer r.Mutex.Unlock()
-
+	
+	conn, exists := r.Connections[connID]
+	if !exists {
+		r.Mutex.Unlock()
+		return
+	}
+	
 	delete(r.Connections, connID)
+	totalUsers := len(r.Connections)
+	
+	// Broadcast user leave event before unlocking
+	leaveData := UserLeaveData{
+		UserID:     conn.UserID,
+		RoomID:     r.ID,
+		TotalUsers: totalUsers,
+		LeftAt:     time.Now().Format(time.RFC3339),
+	}
+	r.broadcastEvent("user_leave", leaveData)
+	
+	r.Mutex.Unlock()
 
 	// Stop the counter if no connections are left
-	if len(r.Connections) == 0 {
+	if totalUsers == 0 {
 		r.stopCounter()
+	}
+}
+
+// broadcastEvent broadcasts an event to all connections in the room
+func (r *Room) broadcastEvent(eventType string, data interface{}) {
+	event := WebSocketEvent{
+		Event: eventType,
+		Data:  data,
+	}
+	
+	eventJSON, err := json.Marshal(event)
+	if err != nil {
+		return
+	}
+	
+	connections := make([]*WebSocketConnection, 0, len(r.Connections))
+	for _, conn := range r.Connections {
+		connections = append(connections, conn)
+	}
+	
+	// Broadcast to all connections (unlock before network operations)
+	for _, wsConn := range connections {
+		err := wsConn.Conn.Write(context.Background(), websocket.MessageText, eventJSON)
+		if err != nil {
+			// Connection error will be handled by the connection handler
+			continue
+		}
 	}
 }
 
@@ -114,20 +195,17 @@ func (r *Room) startCounter() {
 				r.Mutex.Lock()
 				r.Counter++
 				counter := r.Counter
-				connections := make([]*WebSocketConnection, 0, len(r.Connections))
-				for _, conn := range r.Connections {
-					connections = append(connections, conn)
-				}
+				roomID := r.ID
 				r.Mutex.Unlock()
 
-				// Broadcast counter to all connections in the room
-				for _, wsConn := range connections {
-					err := wsConn.Conn.Write(context.Background(), websocket.MessageText, []byte(fmt.Sprintf("%d", counter)))
-					if err != nil {
-						// Connection error will be handled by the connection handler
-						continue
-					}
+				// Broadcast counter update event
+				counterData := CounterData{
+					Count:  counter,
+					RoomID: roomID,
 				}
+				r.Mutex.RLock()
+				r.broadcastEvent("counter_update", counterData)
+				r.Mutex.RUnlock()
 			case <-r.StopChan:
 				return
 			}
