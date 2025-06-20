@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 10px 0;
+        }
+        input, button {
+            padding: 10px;
+            margin: 5px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        #messages {
+            height: 300px;
+            overflow-y: auto;
+            border: 1px solid #ccc;
+            padding: 10px;
+            background-color: #f8f9fa;
+            font-family: monospace;
+        }
+        .message {
+            margin: 5px 0;
+            padding: 5px;
+            border-left: 3px solid #007bff;
+            background-color: #e7f3ff;
+        }
+        .error {
+            border-left-color: #dc3545;
+            background-color: #f8d7da;
+        }
+        .status {
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        .connected {
+            color: #28a745;
+        }
+        .disconnected {
+            color: #dc3545;
+        }
+    </style>
+</head>
+<body>
+    <h1>WebSocket テスト</h1>
+    
+    <div class="container">
+        <h2>接続設定</h2>
+        <div>
+            <label for="roomId">Room ID:</label>
+            <input type="text" id="roomId" value="room1" placeholder="ルームIDを入力">
+        </div>
+        <div>
+            <label for="userId">User ID (オプション):</label>
+            <input type="text" id="userId" value="" placeholder="ユーザーIDを入力">
+        </div>
+        <div>
+            <button id="connectBtn" onclick="connect()">接続</button>
+            <button id="disconnectBtn" onclick="disconnect()" disabled>切断</button>
+        </div>
+        <div class="status" id="status">切断中</div>
+    </div>
+
+    <div class="container">
+        <h2>メッセージ</h2>
+        <div id="messages"></div>
+        <button onclick="clearMessages()">メッセージをクリア</button>
+    </div>
+
+    <div class="container">
+        <h2>ルーム情報</h2>
+        <button onclick="getRoomInfo()">ルーム情報を取得</button>
+        <div id="roomInfo"></div>
+    </div>
+
+    <script>
+        let socket = null;
+        let reconnectInterval = null;
+
+        function addMessage(message, isError = false) {
+            const messagesDiv = document.getElementById('messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = isError ? 'message error' : 'message';
+            messageDiv.innerHTML = `<strong>${new Date().toLocaleTimeString()}:</strong> ${message}`;
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        function updateStatus(status, isConnected = false) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.textContent = status;
+            statusDiv.className = isConnected ? 'status connected' : 'status disconnected';
+            
+            document.getElementById('connectBtn').disabled = isConnected;
+            document.getElementById('disconnectBtn').disabled = !isConnected;
+        }
+
+        function connect() {
+            const roomId = document.getElementById('roomId').value.trim();
+            const userId = document.getElementById('userId').value.trim();
+            
+            if (!roomId) {
+                alert('Room IDを入力してください');
+                return;
+            }
+
+            // WebSocket URLを構築
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const host = window.location.host;
+            let wsUrl = `${protocol}//${host}/ws?room_id=${encodeURIComponent(roomId)}`;
+            
+            if (userId) {
+                wsUrl += `&user_id=${encodeURIComponent(userId)}`;
+            }
+
+            try {
+                socket = new WebSocket(wsUrl);
+                
+                socket.onopen = function(event) {
+                    addMessage(`WebSocket接続が確立されました (Room: ${roomId})`);
+                    updateStatus('接続中', true);
+                };
+                
+                socket.onmessage = function(event) {
+                    // サーバーから送信されるのは単純な数値文字列
+                    const counter = event.data;
+                    addMessage(`カウンター: ${counter} (Room: ${roomId})`);
+                };
+                
+                socket.onclose = function(event) {
+                    addMessage(`WebSocket接続が閉じられました (Code: ${event.code})`, event.code !== 1000);
+                    updateStatus('切断中', false);
+                    socket = null;
+                };
+                
+                socket.onerror = function(event) {
+                    addMessage('WebSocketエラーが発生しました', true);
+                    updateStatus('エラー', false);
+                };
+                
+            } catch (error) {
+                addMessage(`接続エラー: ${error.message}`, true);
+                updateStatus('エラー', false);
+            }
+        }
+
+        function disconnect() {
+            if (socket) {
+                socket.close(1000, 'User disconnect');
+                socket = null;
+            }
+        }
+
+        function clearMessages() {
+            document.getElementById('messages').innerHTML = '';
+        }
+
+        async function getRoomInfo() {
+            try {
+                const response = await fetch('/ws/rooms');
+                const data = await response.json();
+                
+                const roomInfoDiv = document.getElementById('roomInfo');
+                roomInfoDiv.innerHTML = '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
+            } catch (error) {
+                document.getElementById('roomInfo').innerHTML = `<p style="color: red;">エラー: ${error.message}</p>`;
+            }
+        }
+
+        // ページを閉じる時にWebSocket接続を閉じる
+        window.addEventListener('beforeunload', function() {
+            if (socket) {
+                socket.close();
+            }
+        });
+
+        // 初期状態の設定
+        updateStatus('切断中', false);
+        addMessage('WebSocketテストページが読み込まれました');
+    </script>
+</body>
+</html>
