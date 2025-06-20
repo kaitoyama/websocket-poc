@@ -17,7 +17,7 @@ func SetupRouter(database *sql.DB) *echo.Echo {
 	e := echo.New()
 
 	// Load OpenAPI spec from file
-	swaggerBytes, err := os.ReadFile("openapi/swagger.yml")
+	swaggerBytes, err := os.ReadFile("./openapi/swagger.yml")
 	if err != nil {
 		log.Fatalf("Failed to read swagger file: %v", err)
 	}
