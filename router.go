@@ -55,7 +55,10 @@ func SetupRouter(database *sql.DB) *echo.Echo {
 	if err != nil {
 		log.Fatalf("Failed to create sub filesystem for static files: %v", err)
 	}
-	e.GET("/static/*", echo.WrapHandler(http.FileServer(http.FS(staticSubFS))))
+	// Strip the /static prefix and serve files
+	e.GET("/static/*", func(c echo.Context) error {
+		return echo.WrapHandler(http.StripPrefix("/static/", http.FileServer(http.FS(staticSubFS))))(c)
+	})
 
 	return e
 }
