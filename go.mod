@@ -7,7 +7,7 @@ require (
 	github.com/getkin/kin-openapi v0.144.0
 	github.com/go-sql-driver/mysql v1.7.1
 	github.com/labstack/echo/v4 v4.13.3
-	github.com/oapi-codegen/oapi-codegen/v2 v2.7.0
+	github.com/oapi-codegen/oapi-codegen/v2 v2.7.1
 	github.com/rs/zerolog v1.31.0
 )
 
